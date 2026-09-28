@@ -8,7 +8,7 @@ on:
 
     outputs:
       image-digest:
-        description: "Immutable digest of the pushed backend image"
+        description: "Immutable digest of the pushed frontend image"
         value: ${{ jobs.build-image.outputs.image-digest }}
 
       image-ref:
@@ -28,9 +28,9 @@ jobs:
       contents: read
 
     env:
-      IMAGE_NAME: ${{ vars.DOCKER_USERNAME }}/myapp-backend
+      IMAGE_NAME: ${{ vars.DOCKER_USERNAME }}/myapp-frontend
       IMAGE_TAG: ${{ github.sha }}
-      IMAGE: ${{ vars.DOCKER_USERNAME }}/myapp-backend:${{ github.sha }}
+      IMAGE: ${{ vars.DOCKER_USERNAME }}/myapp-frontend:${{ github.sha }}
 
     steps:
       - name: Checkout repository
@@ -47,11 +47,11 @@ jobs:
           username: ${{ vars.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Build backend image
+      - name: Build frontend image
         run: |
           docker build \
             -t "$IMAGE" \
-            ./backend/backend-application/
+            ./frontend-application/
 
       - name: Verify built image
         run: |
@@ -164,16 +164,16 @@ jobs:
           trivy image \
             "$IMAGE" \
             --format spdx-json \
-            --output myapp-backend.spdx.json
+            --output myapp-frontend.spdx.json
 
       - name: Upload SBOM
         uses: actions/upload-artifact@v6
         with:
-          name: myapp-backend-sbom
-          path: myapp-backend.spdx.json
+          name: myapp-frontend-sbom
+          path: myapp-frontend.spdx.json
           if-no-files-found: error
 
-      - name: Push backend image
+      - name: Push frontend image
         run: |
           docker push "$IMAGE"
 
