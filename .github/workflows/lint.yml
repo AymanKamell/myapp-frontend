@@ -42,6 +42,7 @@ jobs:
         continue-on-error: true
         run: |
           docker run --rm \
+            --add-host backend:127.0.0.1 \
             -v "$PWD/frontend-application/nginx.conf:/etc/nginx/nginx.conf:ro" \
             nginx:alpine \
             nginx -t \
