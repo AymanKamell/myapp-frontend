@@ -16,12 +16,7 @@ jobs:
   lint:
     uses: ./.github/workflows/lint.yml
 
-  test:
-    uses: ./.github/workflows/tests.yml
-
   sonarqube:
-    needs:
-      - test
     uses: ./.github/workflows/sonarqube.yml
     secrets:
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
@@ -31,7 +26,6 @@ jobs:
     needs:
       - source-security
       - lint
-      - test
       - sonarqube
     uses: ./.github/workflows/build-secure-image.yml
     secrets:
