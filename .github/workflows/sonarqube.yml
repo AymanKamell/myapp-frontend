@@ -5,7 +5,7 @@ on:
     secrets:
       SONAR_TOKEN:
         required: true
-        
+
 jobs:
   sonarqube:
     name: SonarQube Cloud Analysis
@@ -27,6 +27,7 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         with:
           args: >
+            -Dsonar.projectKey=AymanKamell_myapp-frontend
             -Dsonar.qualitygate.wait=true
             -Dsonar.qualitygate.timeout=300
 
@@ -45,8 +46,8 @@ jobs:
             echo ""
             echo "| Parameter | Configuration |"
             echo "|---|---|"
-            echo "| Project | AymanKamell_myapp-demo |"
-            echo "| Organization | aymankamel |"
+            echo "| Project | AymanKamell_myapp-frontend |"
+            echo "| Organization | AymanKamel |"
             echo "| Branch | ${{ github.ref_name }} |"
             echo "| Analysis Type | Static Code Analysis |"
             echo "| Quality Gate | Sonar way |"
@@ -55,5 +56,5 @@ jobs:
             echo ""
             echo "### SonarQube Cloud"
             echo ""
-            echo "[View SonarQube Project](https://sonarcloud.io/dashboard?id=AymanKamell_myapp-demo&branch=${{ github.ref_name }})"
+            echo "[View SonarQube Project](https://sonarcloud.io/dashboard?id=AymanKamell_myapp-frontend&branch=${{ github.ref_name }})"
           } >> "$GITHUB_STEP_SUMMARY"
