@@ -1,0 +1,59 @@
+name: SonarQube Cloud Analysis
+
+on:
+  workflow_call:
+    secrets:
+      SONAR_TOKEN:
+        required: true
+        
+jobs:
+  sonarqube:
+    name: SonarQube Cloud Analysis
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: SonarQube Scan
+        id: sonarqube
+        uses: SonarSource/sonarqube-scan-action@v8
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.qualitygate.wait=true
+            -Dsonar.qualitygate.timeout=300
+
+      - name: Generate SonarQube summary
+        if: always()
+        run: |
+          {
+            echo "## SonarQube Cloud Analysis"
+            echo ""
+            echo "| Quality Control | Status |"
+            echo "|---|---|"
+            echo "| SonarQube Analysis | ${{ steps.sonarqube.outcome == 'success' && 'PASS' || 'FAIL' }} |"
+            echo "| Quality Gate | ${{ steps.sonarqube.outcome == 'success' && 'PASS' || 'FAIL' }} |"
+            echo ""
+            echo "### Analysis Configuration"
+            echo ""
+            echo "| Parameter | Configuration |"
+            echo "|---|---|"
+            echo "| Project | AymanKamell_myapp-demo |"
+            echo "| Organization | aymankamel |"
+            echo "| Branch | ${{ github.ref_name }} |"
+            echo "| Analysis Type | Static Code Analysis |"
+            echo "| Quality Gate | Sonar way |"
+            echo "| Quality Gate Enforcement | Enabled |"
+            echo "| Quality Gate Timeout | 300 seconds |"
+            echo ""
+            echo "### SonarQube Cloud"
+            echo ""
+            echo "[View SonarQube Project](https://sonarcloud.io/dashboard?id=AymanKamell_myapp-demo&branch=${{ github.ref_name }})"
+          } >> "$GITHUB_STEP_SUMMARY"

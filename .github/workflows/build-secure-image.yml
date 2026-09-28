@@ -1,0 +1,218 @@
+name: Build Secure Image
+
+on:
+  workflow_call:
+    secrets:
+      DOCKER_PASSWORD:
+        required: true
+
+    outputs:
+      image-digest:
+        description: "Immutable digest of the pushed backend image"
+        value: ${{ jobs.build-image.outputs.image-digest }}
+
+      image-ref:
+        description: "Immutable image reference using the image digest"
+        value: ${{ jobs.build-image.outputs.image-ref }}
+
+jobs:
+  build-image:
+    name: Build, Scan and Push Image
+    runs-on: ubuntu-latest
+
+    outputs:
+      image-digest: ${{ steps.image-digest.outputs.image-digest }}
+      image-ref: ${{ steps.image-digest.outputs.image-ref }}
+
+    permissions:
+      contents: read
+
+    env:
+      IMAGE_NAME: ${{ vars.DOCKER_USERNAME }}/myapp-backend
+      IMAGE_TAG: ${{ github.sha }}
+      IMAGE: ${{ vars.DOCKER_USERNAME }}/myapp-backend:${{ github.sha }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install Trivy
+        uses: aquasecurity/setup-trivy@v0.2.6
+        with:
+          version: v0.69.3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ vars.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build backend image
+        run: |
+          docker build \
+            -t "$IMAGE" \
+            ./backend/backend-application/
+
+      - name: Verify built image
+        run: |
+          docker image inspect "$IMAGE"
+
+          echo "Built image:"
+          docker image ls "$IMAGE_NAME"
+
+      - name: Run Trivy image scan
+        id: trivy-image
+        run: |
+          trivy image \
+            "$IMAGE" \
+            --severity HIGH,CRITICAL \
+            --ignore-unfixed \
+            --format json \
+            --output trivy-image-results.json \
+            --exit-code 0
+
+      - name: Download Trivy HTML template
+        if: always()
+        run: |
+          curl -L \
+            https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/html.tpl \
+            -o html.tpl
+
+      - name: Generate Trivy HTML report
+        if: always()
+        run: |
+          trivy convert \
+            --format template \
+            --template "@html.tpl" \
+            --output trivy-image-results.html \
+            trivy-image-results.json
+
+      - name: Upload Trivy HTML report
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: trivy-image-html-report
+          path: trivy-image-results.html
+          if-no-files-found: error
+
+      - name: Generate Trivy security summary
+        if: always()
+        run: |
+          CRITICAL=$(jq \
+            '[.Results[]?.Vulnerabilities[]? | select(.Severity == "CRITICAL")] | length' \
+            trivy-image-results.json)
+
+          HIGH=$(jq \
+            '[.Results[]?.Vulnerabilities[]? | select(.Severity == "HIGH")] | length' \
+            trivy-image-results.json)
+
+          TOTAL=$((CRITICAL + HIGH))
+
+          if [ "$TOTAL" -eq 0 ]; then
+            GATE="PASS"
+          else
+            GATE="FAIL"
+          fi
+
+          {
+            echo "## Trivy Image Security Report"
+            echo ""
+            echo "| Metric | Result |"
+            echo "|---|---:|"
+            echo "| Critical vulnerabilities | $CRITICAL |"
+            echo "| High vulnerabilities | $HIGH |"
+            echo "| Total findings | $TOTAL |"
+            echo "| Security gate | $GATE |"
+            echo ""
+            echo "### Scan Target"
+            echo ""
+            echo "| Parameter | Value |"
+            echo "|---|---|"
+            echo "| Image | \`$IMAGE\` |"
+            echo "| Severity | HIGH, CRITICAL |"
+            echo "| Unfixed vulnerabilities | Ignored |"
+            echo "| Report | trivy-image-results.json |"
+            echo "| HTML Report | trivy-image-results.html |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Enforce Trivy security gate
+        run: |
+          CRITICAL=$(jq \
+            '[.Results[]?.Vulnerabilities[]? | select(.Severity == "CRITICAL")] | length' \
+            trivy-image-results.json)
+
+          HIGH=$(jq \
+            '[.Results[]?.Vulnerabilities[]? | select(.Severity == "HIGH")] | length' \
+            trivy-image-results.json)
+
+          TOTAL=$((CRITICAL + HIGH))
+
+          echo "CRITICAL vulnerabilities: $CRITICAL"
+          echo "HIGH vulnerabilities: $HIGH"
+          echo "TOTAL vulnerabilities: $TOTAL"
+
+          if [ "$TOTAL" -gt 0 ]; then
+            echo "Trivy security gate FAILED."
+            exit 1
+          fi
+
+          echo "Trivy security gate PASSED."
+
+      - name: Generate SBOM
+        id: sbom
+        run: |
+          trivy image \
+            "$IMAGE" \
+            --format spdx-json \
+            --output myapp-backend.spdx.json
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v6
+        with:
+          name: myapp-backend-sbom
+          path: myapp-backend.spdx.json
+          if-no-files-found: error
+
+      - name: Push backend image
+        run: |
+          docker push "$IMAGE"
+
+      - name: Get pushed image digest
+        id: image-digest
+        run: |
+          IMAGE_DIGEST=$(docker inspect \
+            --format='{{index .RepoDigests 0}}' \
+            "$IMAGE" | cut -d'@' -f2)
+
+          echo "Image: $IMAGE"
+          echo "Image digest: $IMAGE_DIGEST"
+
+          echo "image-digest=$IMAGE_DIGEST" >> "$GITHUB_OUTPUT"
+          echo "image-ref=$IMAGE@$IMAGE_DIGEST" >> "$GITHUB_OUTPUT"
+
+      - name: Generate build summary
+        if: always()
+        env:
+          IMAGE_DIGEST: ${{ steps.image-digest.outputs.image-digest }}
+          IMAGE_REF: ${{ steps.image-digest.outputs.image-ref }}
+          SBOM_OUTCOME: ${{ steps.sbom.outcome }}
+        run: |
+          {
+            echo "## Build and Image Security Summary"
+            echo ""
+            echo "| Control | Status |"
+            echo "|---|---|"
+            echo "| Container Build | ${{ steps.trivy-image.outcome == 'success' && 'COMPLETED' || 'FAILED' }} |"
+            echo "| Trivy Image Scan | ${{ steps.trivy-image.outcome == 'success' && 'COMPLETED' || 'FAILED' }} |"
+            echo "| SBOM Generation | ${SBOM_OUTCOME^^} |"
+            echo "| Image Push | ${{ steps.image-digest.outcome == 'success' && 'COMPLETED' || 'FAILED' }} |"
+            echo ""
+            echo "### Image"
+            echo ""
+            echo "| Parameter | Value |"
+            echo "|---|---|"
+            echo "| Image | \`$IMAGE\` |"
+            echo "| Digest | \`${IMAGE_DIGEST:-NOT_AVAILABLE}\` |"
+            echo "| Immutable Reference | \`${IMAGE_REF:-NOT_AVAILABLE}\` |"
+            echo "| SBOM | SPDX JSON |"
+          } >> "$GITHUB_STEP_SUMMARY"

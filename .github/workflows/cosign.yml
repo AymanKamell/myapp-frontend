@@ -1,0 +1,139 @@
+name: Cosign Image Security
+
+on:
+  workflow_call:
+    inputs:
+      image-ref:
+        description: "Immutable image reference to attest and sign"
+        required: true
+        type: string
+
+    secrets:
+      COSIGN_PRIVATE_KEY:
+        required: true
+      COSIGN_PASSWORD:
+        required: true
+      DOCKER_PASSWORD:
+        required: true
+
+jobs:
+  cosign:
+    name: SBOM Attestation and Image Signing
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    env:
+      IMAGE_REF: ${{ inputs.image-ref }}
+
+    steps:
+      - name: Download SBOM
+        uses: actions/download-artifact@v6
+        with:
+          name: myapp-backend-sbom
+          path: .
+
+      - name: Verify SBOM artifact
+        run: |
+          test -f myapp-backend.spdx.json
+
+          echo "SBOM artifact:"
+          ls -lh myapp-backend.spdx.json
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3.9.0
+
+      - name: Verify Cosign installation
+        run: |
+          cosign version
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ vars.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Prepare Cosign keys
+        env:
+          COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+          COSIGN_PUBLIC_KEY: ${{ vars.COSIGN_PUBLIC_KEY }}
+        run: |
+          printf '%s' "$COSIGN_PRIVATE_KEY" > "$RUNNER_TEMP/cosign.key"
+          chmod 600 "$RUNNER_TEMP/cosign.key"
+
+          printf '%s' "$COSIGN_PUBLIC_KEY" > "$RUNNER_TEMP/cosign.pub"
+          chmod 644 "$RUNNER_TEMP/cosign.pub"
+
+      - name: Attest SBOM
+        id: cosign-attest
+        env:
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        run: |
+          cosign attest \
+            --yes \
+            --key "$RUNNER_TEMP/cosign.key" \
+            --type spdxjson \
+            --predicate myapp-backend.spdx.json \
+            "$IMAGE_REF"
+
+      - name: Verify SBOM attestation
+        id: cosign-verify-attestation
+        run: |
+          cosign verify-attestation \
+            --key "$RUNNER_TEMP/cosign.pub" \
+            --type https://spdx.dev/Document \
+            "$IMAGE_REF"
+
+      - name: Sign image
+        id: cosign-sign
+        env:
+          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        run: |
+          cosign sign \
+            --yes \
+            --key "$RUNNER_TEMP/cosign.key" \
+            "$IMAGE_REF"
+
+      - name: Verify image signature
+        id: cosign-verify
+        run: |
+          cosign verify \
+            --key "$RUNNER_TEMP/cosign.pub" \
+            "$IMAGE_REF"
+
+      - name: Generate Cosign security summary
+        if: always()
+        env:
+          ATTEST_OUTCOME: ${{ steps.cosign-attest.outcome }}
+          ATTEST_VERIFY_OUTCOME: ${{ steps.cosign-verify-attestation.outcome }}
+          SIGN_OUTCOME: ${{ steps.cosign-sign.outcome }}
+          SIGN_VERIFY_OUTCOME: ${{ steps.cosign-verify.outcome }}
+        run: |
+          {
+            echo "## Cosign Image Security Report"
+            echo ""
+            echo "| Security Control | Status |"
+            echo "|---|---|"
+            echo "| SBOM Artifact | $([ -f myapp-backend.spdx.json ] && echo "AVAILABLE" || echo "MISSING") |"
+            echo "| SBOM Attestation | ${ATTEST_OUTCOME^^} |"
+            echo "| SBOM Attestation Verification | ${ATTEST_VERIFY_OUTCOME^^} |"
+            echo "| Image Signature | ${SIGN_OUTCOME^^} |"
+            echo "| Image Signature Verification | ${SIGN_VERIFY_OUTCOME^^} |"
+            echo ""
+            echo "### Signing Target"
+            echo ""
+            echo "| Parameter | Value |"
+            echo "|---|---|"
+            echo "| Image | \`$IMAGE_REF\` |"
+            echo "| SBOM Format | SPDX JSON |"
+            echo "| Attestation | Cosign |"
+            echo "| Signature | Cosign |"
+            echo "| Verification | Public Key |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Clean up Cosign private key
+        if: always()
+        run: |
+          rm -f "$RUNNER_TEMP/cosign.key"
+          rm -f "$RUNNER_TEMP/cosign.pub"

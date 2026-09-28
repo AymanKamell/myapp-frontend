@@ -1,0 +1,133 @@
+name: RHACS Image Security Scan
+
+on:
+  workflow_call:
+    inputs:
+      image-ref:
+        description: "Immutable image reference to scan"
+        required: true
+        type: string
+
+    secrets:
+      ROX_API_TOKEN:
+        required: true
+
+jobs:
+  rhacs-scan:
+    name: RHACS Image Policy Check
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    env:
+      ROX_API_TOKEN: ${{ secrets.ROX_API_TOKEN }}
+      ROX_ENDPOINT: ${{ vars.ROX_ENDPOINT }}
+      IMAGE_REF: ${{ inputs.image-ref }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Install roxctl
+        run: |
+          curl -L \
+            -o roxctl \
+            https://mirror.openshift.com/pub/rhacs/assets/4.11.4/bin/Linux/roxctl
+
+          chmod +x roxctl
+          sudo mv roxctl /usr/local/bin/roxctl
+
+      - name: Verify roxctl installation
+        run: |
+          roxctl version
+
+      - name: Run RHACS image policy check
+        id: rhacs-check
+        shell: bash
+        run: |
+          set +e
+
+          roxctl image check \
+            -o json \
+            --image="$IMAGE_REF" \
+            > rhacs-policy-check.json
+
+          ROXCTL_EXIT_CODE=$?
+
+          set -e
+
+          echo "RHACS exit code: $ROXCTL_EXIT_CODE"
+          echo "exit-code=$ROXCTL_EXIT_CODE" >> "$GITHUB_OUTPUT"
+
+          exit 0
+
+      - name: Inspect RHACS JSON report
+        if: always()
+        run: |
+          echo "===== RHACS POLICY CHECK ====="
+          jq . rhacs-policy-check.json
+
+      - name: Generate RHACS HTML report
+        if: always()
+        run: |
+          python3 scripts/generate-rhacs-report.py
+
+      - name: Upload RHACS JSON report
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: rhacs-policy-json
+          path: rhacs-policy-check.json
+          if-no-files-found: error
+
+      - name: Upload RHACS HTML report
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: rhacs-policy-html-report
+          path: rhacs-policy-check.html
+          if-no-files-found: error
+
+      - name: Generate RHACS security summary
+        if: always()
+        env:
+          RHACS_EXIT_CODE: ${{ steps.rhacs-check.outputs.exit-code }}
+        run: |
+          if [ "$RHACS_EXIT_CODE" = "0" ]; then
+            GATE="PASS"
+          else
+            GATE="FAIL"
+          fi
+
+          {
+            echo "## RHACS Image Security Report"
+            echo ""
+            echo "| Security Control | Result |"
+            echo "|---|---|"
+            echo "| RHACS Image Policy Check | $GATE |"
+            echo "| RHACS Exit Code | $RHACS_EXIT_CODE |"
+            echo ""
+            echo "### Scan Target"
+            echo ""
+            echo "| Parameter | Value |"
+            echo "|---|---|"
+            echo "| Image | \`$IMAGE_REF\` |"
+            echo "| RHACS Endpoint | \`$ROX_ENDPOINT\` |"
+            echo "| Check Type | Build-stage policy compliance |"
+            echo "| JSON Report | rhacs-policy-check.json |"
+            echo "| HTML Report | rhacs-policy-check.html |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Enforce RHACS security gate
+        if: always()
+        env:
+          RHACS_EXIT_CODE: ${{ steps.rhacs-check.outputs.exit-code }}
+        run: |
+          if [ "$RHACS_EXIT_CODE" != "0" ]; then
+            echo "RHACS security gate FAILED."
+            echo "One or more RHACS build-stage policies were violated."
+            exit 1
+          fi
+
+          echo "RHACS security gate PASSED."

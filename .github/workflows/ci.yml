@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  source-security:
+    uses: ./.github/workflows/source-security.yml
+
+  lint:
+    uses: ./.github/workflows/lint.yml
+
+  test:
+    uses: ./.github/workflows/tests.yml
+
+  sonarqube:
+    needs:
+      - test
+    uses: ./.github/workflows/sonarqube.yml
+    secrets:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+  build-secure:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs:
+      - source-security
+      - lint
+      - test
+      - sonarqube
+    uses: ./.github/workflows/build-secure-image.yml
+    secrets:
+      DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+
+  rhacs-scan:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs:
+      - build-secure
+    uses: ./.github/workflows/rhacs-scan.yml
+    with:
+      image-ref: ${{ needs.build-secure.outputs.image-ref }}
+    secrets:
+      ROX_API_TOKEN: ${{ secrets.ROX_API_TOKEN }}
+
+  cosign:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs:
+      - build-secure
+      - rhacs-scan
+    uses: ./.github/workflows/cosign.yml
+    with:
+      image-ref: ${{ needs.build-secure.outputs.image-ref }}
+    secrets:
+      COSIGN_PRIVATE_KEY: ${{ secrets.COSIGN_PRIVATE_KEY }}
+      COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+      DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+
+  gitops-deploy:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs:
+      - build-secure
+      - cosign
+    uses: ./.github/workflows/gitops-deploy.yml
+    with:
+      image-digest: ${{ needs.build-secure.outputs.image-digest }}
+    secrets:
+      GITOPS_TOKEN: ${{ secrets.GITOPS_TOKEN }}

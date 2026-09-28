@@ -1,0 +1,116 @@
+name: Python Linting
+
+on:
+  workflow_call:
+
+jobs:
+  lint:
+    name: Python Linting
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install Ruff
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff
+
+      - name: Run Ruff lint
+        id: ruff
+        working-directory: backend/backend-application
+        shell: bash
+        run: |
+          set +e
+
+          ruff check . --output-format json > ruff-lint-report.json
+          RUFF_EXIT_CODE=$?
+
+          set -e
+
+          echo "exit_code=$RUFF_EXIT_CODE" >> "$GITHUB_OUTPUT"
+
+          exit 0
+
+      - name: Count lint violations
+        if: always()
+        id: lint-results
+        working-directory: backend/backend-application
+        run: |
+          if [ -f ruff-lint-report.json ] && jq -e 'type == "array"' ruff-lint-report.json > /dev/null 2>&1; then
+            VIOLATIONS=$(jq 'length' ruff-lint-report.json)
+          else
+            VIOLATIONS=0
+          fi
+
+          echo "violations=$VIOLATIONS" >> "$GITHUB_OUTPUT"
+
+      - name: Generate HTML lint report
+        if: always()
+        run: |
+          python scripts/generate-ruff-report.py \
+            backend/backend-application/ruff-lint-report.json \
+            backend/backend-application/ruff-lint-report.html
+
+      - name: Upload lint reports
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: ruff-lint-reports
+          path: |
+            backend/backend-application/ruff-lint-report.json
+            backend/backend-application/ruff-lint-report.html
+          if-no-files-found: error
+
+      - name: Generate lint summary
+        if: always()
+        env:
+          RUFF_EXIT_CODE: ${{ steps.ruff.outputs.exit_code }}
+          VIOLATIONS: ${{ steps.lint-results.outputs.violations }}
+        run: |
+          if [ "$RUFF_EXIT_CODE" = "0" ]; then
+            STATUS="PASS"
+            GATE="PASSED"
+          else
+            STATUS="FAIL"
+            GATE="FAILED"
+          fi
+
+          {
+            echo "## Linting Report"
+            echo ""
+            echo "| Control | Status |"
+            echo "|---|---|"
+            echo "| Linting | $STATUS |"
+            echo "| Tool | Ruff |"
+            echo "| Source | backend/backend-application |"
+            echo "| Files Checked | Python source and test files |"
+            echo "| Violations | $VIOLATIONS |"
+            echo "| Lint Gate | $GATE |"
+            echo ""
+            echo "### Report Artifact"
+            echo ""
+            echo "| Artifact | Status |"
+            echo "|---|---|"
+            echo "| ruff-lint-report | GENERATED |"
+            echo "| ruff-lint-report.html | GENERATED |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Enforce lint gate
+        if: always()
+        env:
+          RUFF_EXIT_CODE: ${{ steps.ruff.outputs.exit_code }}
+        run: |
+          if [ "$RUFF_EXIT_CODE" != "0" ]; then
+            echo "Ruff linting failed. Review the uploaded lint report."
+            exit 1
+          fi

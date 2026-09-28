@@ -1,0 +1,47 @@
+name: Source Security
+
+on:
+  workflow_call:
+
+jobs:
+  source-security:
+    name: Source Security Scan
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Run Trivy filesystem scan
+        id: trivy-fs
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: table
+          severity: HIGH,CRITICAL
+          exit-code: 1
+          ignore-unfixed: true
+
+      - name: Run Gitleaks
+        id: gitleaks
+        uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate security summary
+        if: always()
+        run: |
+          {
+            echo "## Source Security Scan"
+            echo ""
+            echo "| Security Control | Status |"
+            echo "|---|---|"
+            echo "| Trivy Filesystem Scan | ${{ steps.trivy-fs.outcome == 'success' && 'PASS' || 'FAIL' }} |"
+            echo "| Gitleaks Secret Detection | ${{ steps.gitleaks.outcome == 'success' && 'PASS' || 'FAIL' }} |"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,87 @@
+name: GitOps Deployment
+
+on:
+  workflow_call:
+    inputs:
+      image-digest:
+        description: "Immutable image digest"
+        required: true
+        type: string
+
+    secrets:
+      GITOPS_TOKEN:
+        required: true
+
+jobs:
+  gitops-deploy:
+    name: Update GitOps Repository
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout GitOps repository
+        uses: actions/checkout@v6
+        with:
+          repository: AymanKamell/myapp-gitops
+          ref: main
+          token: ${{ secrets.GITOPS_TOKEN }}
+          path: myapp-gitops
+
+      - name: Update backend image digest
+        working-directory: myapp-gitops
+        env:
+          IMAGE_DIGEST: ${{ inputs.image-digest }}
+        run: |
+          sed -i \
+            "s|^\(\s*digest:\s*\).*|\1${IMAGE_DIGEST}|" \
+            backend/kustomization.yaml
+
+      - name: Verify change
+        working-directory: myapp-gitops
+        run: |
+          git diff -- backend/kustomization.yaml
+
+      - name: Commit and push GitOps change
+        id: gitops-push
+        working-directory: myapp-gitops
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add backend/kustomization.yaml
+
+          git commit -m "Update backend image digest"
+
+          git push origin main
+
+      - name: Generate GitOps deployment summary
+        if: always()
+        env:
+          PUSH_OUTCOME: ${{ steps.gitops-push.outcome }}
+          IMAGE_DIGEST: ${{ inputs.image-digest }}
+        run: |
+          if [ "$PUSH_OUTCOME" = "success" ]; then
+            STATUS="SUCCESS"
+          else
+            STATUS="FAILED"
+          fi
+
+          {
+            echo "## GitOps Deployment Summary"
+            echo ""
+            echo "| Deployment Control | Status |"
+            echo "|---|---|"
+            echo "| GitOps Repository Update | $STATUS |"
+            echo "| Git Push | $STATUS |"
+            echo ""
+            echo "### Deployment Details"
+            echo ""
+            echo "| Parameter | Value |"
+            echo "|---|---|"
+            echo "| Repository | AymanKamell/myapp-gitops |"
+            echo "| Branch | main |"
+            echo "| Manifest | backend/kustomization.yaml |"
+            echo "| Image Digest | \`$IMAGE_DIGEST\` |"
+          } >> "$GITHUB_STEP_SUMMARY"

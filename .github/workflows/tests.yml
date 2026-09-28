@@ -1,0 +1,84 @@
+name: Unit Tests
+
+on:
+  workflow_call:
+
+jobs:
+  test:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        working-directory: backend/backend-application
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest-html pytest-cov
+
+      - name: Run tests with coverage
+        id: pytest
+        working-directory: backend/backend-application
+        run: |
+          pytest \
+            --cov=. \
+            --cov-report=xml:coverage.xml \
+            --cov-report=term-missing \
+            --html=pytest-report.html \
+            --self-contained-html
+
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: pytest-html-report
+          path: backend/backend-application/pytest-report.html
+          if-no-files-found: error
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: python-coverage
+          path: backend/backend-application/coverage.xml
+          if-no-files-found: error
+
+      - name: Generate test summary
+        if: always()
+        working-directory: backend/backend-application
+        env:
+          TEST_OUTCOME: ${{ steps.pytest.outcome }}
+        run: |
+          {
+            echo "## Unit Test Summary"
+            echo ""
+            echo "| Test Control | Status |"
+            echo "|---|---|"
+            echo "| Unit Tests | ${TEST_OUTCOME^^} |"
+            echo "| HTML Test Report | GENERATED |"
+            echo "| Coverage Report | GENERATED |"
+            echo ""
+            echo "### Test Configuration"
+            echo ""
+            echo "| Parameter | Configuration |"
+            echo "|---|---|"
+            echo "| Framework | pytest |"
+            echo "| Python Version | 3.12 |"
+            echo "| Test Location | backend/backend-application |"
+            echo "| Coverage Tool | pytest-cov |"
+            echo "| Coverage Report | coverage.xml |"
+            echo "| Test Report Format | HTML |"
+            echo "| Test Report Artifact | pytest-html-report |"
+            echo "| Coverage Artifact | python-coverage |"
+          } >> "$GITHUB_STEP_SUMMARY"
