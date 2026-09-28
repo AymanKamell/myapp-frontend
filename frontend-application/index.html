@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>My Kubernetes App</title>
+</head>
+<body>
+    <h1>My Kubernetes 3-Tier App</h1>
+
+    <h2>Backend response</h2>
+    <pre id="message">Loading...</pre>
+
+    <h2>Database response</h2>
+    <pre id="database">Loading...</pre>
+
+    <script>
+        fetch("/api/message")
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById("message").textContent =
+                    JSON.stringify(data, null, 2);
+            });
+
+        fetch("/api/db")
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById("database").textContent =
+                    JSON.stringify(data, null, 2);
+            });
+    </script>
+</body>
+</html>
