@@ -1,5 +1,9 @@
 FROM docker.io/library/nginx:alpine
 
+RUN apk update \
+    && apk upgrade libexpat \
+    && rm -rf /var/cache/apk/*
+
 COPY index.html /usr/share/nginx/html/index.html
 COPY nginx.conf /etc/nginx/nginx.conf
 
