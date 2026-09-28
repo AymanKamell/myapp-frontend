@@ -1,11 +1,11 @@
-name: Python Linting
+name: Frontend Linting
 
 on:
   workflow_call:
 
 jobs:
   lint:
-    name: Python Linting
+    name: Frontend Linting
     runs-on: ubuntu-latest
 
     permissions:
@@ -15,102 +15,142 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
-      - name: Set up Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: "3.12"
+      - name: Install HTMLHint
+        run: npm install --global htmlhint
 
-      - name: Install Ruff
+      - name: Run HTMLHint
+        id: htmlhint
+        continue-on-error: true
         run: |
-          python -m pip install --upgrade pip
-          pip install ruff
+          htmlhint frontend-application/index.html \
+            > htmlhint-report.txt 2>&1
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
 
-      - name: Run Ruff lint
-        id: ruff
-        working-directory: backend/backend-application
-        shell: bash
+      - name: Run Hadolint
+        id: hadolint
+        continue-on-error: true
         run: |
-          set +e
+          docker run --rm -i \
+            hadolint/hadolint:latest \
+            hadolint - \
+            < frontend-application/Dockerfile \
+            > hadolint-report.txt 2>&1
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
 
-          ruff check . --output-format json > ruff-lint-report.json
-          RUFF_EXIT_CODE=$?
+      - name: Validate NGINX configuration
+        id: nginx
+        continue-on-error: true
+        run: |
+          docker run --rm \
+            -v "$PWD/frontend-application/nginx.conf:/etc/nginx/nginx.conf:ro" \
+            nginx:alpine \
+            nginx -t \
+            > nginx-report.txt 2>&1
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
 
-          set -e
-
-          echo "exit_code=$RUFF_EXIT_CODE" >> "$GITHUB_OUTPUT"
-
-          exit 0
-
-      - name: Count lint violations
+      - name: Generate lint report
         if: always()
-        id: lint-results
-        working-directory: backend/backend-application
         run: |
-          if [ -f ruff-lint-report.json ] && jq -e 'type == "array"' ruff-lint-report.json > /dev/null 2>&1; then
-            VIOLATIONS=$(jq 'length' ruff-lint-report.json)
+          {
+            echo "<html>"
+            echo "<head><title>Frontend Linting Report</title></head>"
+            echo "<body>"
+            echo "<h1>Frontend Linting Report</h1>"
+
+            echo "<h2>HTMLHint</h2>"
+            echo "<pre>"
+            cat htmlhint-report.txt
+            echo "</pre>"
+
+            echo "<h2>Hadolint</h2>"
+            echo "<pre>"
+            cat hadolint-report.txt
+            echo "</pre>"
+
+            echo "<h2>NGINX Configuration</h2>"
+            echo "<pre>"
+            cat nginx-report.txt
+            echo "</pre>"
+
+            echo "</body>"
+            echo "</html>"
+          } > frontend-lint-report.html
+
+      - name: Generate lint summary
+        if: always()
+        env:
+          HTMLHINT_EXIT_CODE: ${{ steps.htmlhint.outputs.exit_code }}
+          HADOLINT_EXIT_CODE: ${{ steps.hadolint.outputs.exit_code }}
+          NGINX_EXIT_CODE: ${{ steps.nginx.outputs.exit_code }}
+        run: |
+          if [ "$HTMLHINT_EXIT_CODE" = "0" ]; then
+            HTML_STATUS="PASS"
           else
-            VIOLATIONS=0
+            HTML_STATUS="FAIL"
           fi
 
-          echo "violations=$VIOLATIONS" >> "$GITHUB_OUTPUT"
+          if [ "$HADOLINT_EXIT_CODE" = "0" ]; then
+            DOCKERFILE_STATUS="PASS"
+          else
+            DOCKERFILE_STATUS="FAIL"
+          fi
 
-      - name: Generate HTML lint report
-        if: always()
-        run: |
-          python scripts/generate-ruff-report.py \
-            backend/backend-application/ruff-lint-report.json \
-            backend/backend-application/ruff-lint-report.html
+          if [ "$NGINX_EXIT_CODE" = "0" ]; then
+            NGINX_STATUS="PASS"
+          else
+            NGINX_STATUS="FAIL"
+          fi
+
+          if [ "$HTML_STATUS" = "PASS" ] &&
+             [ "$DOCKERFILE_STATUS" = "PASS" ] &&
+             [ "$NGINX_STATUS" = "PASS" ]; then
+            GATE="PASSED"
+          else
+            GATE="FAILED"
+          fi
+
+          {
+            echo "## Frontend Linting Report"
+            echo ""
+            echo "| Control | Tool | Status |"
+            echo "|---|---|---|"
+            echo "| HTML | HTMLHint | $HTML_STATUS |"
+            echo "| Dockerfile | Hadolint | $DOCKERFILE_STATUS |"
+            echo "| NGINX Configuration | nginx -t | $NGINX_STATUS |"
+            echo "| Lint Gate | | $GATE |"
+            echo ""
+            echo "### Reports"
+            echo ""
+            echo "| Artifact | Status |"
+            echo "|---|---|"
+            echo "| frontend-lint-report.html | GENERATED |"
+            echo "| Raw validation reports | GENERATED |"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload lint reports
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: ruff-lint-reports
+          name: frontend-lint-reports
           path: |
-            backend/backend-application/ruff-lint-report.json
-            backend/backend-application/ruff-lint-report.html
+            frontend-lint-report.html
+            htmlhint-report.txt
+            hadolint-report.txt
+            nginx-report.txt
           if-no-files-found: error
-
-      - name: Generate lint summary
-        if: always()
-        env:
-          RUFF_EXIT_CODE: ${{ steps.ruff.outputs.exit_code }}
-          VIOLATIONS: ${{ steps.lint-results.outputs.violations }}
-        run: |
-          if [ "$RUFF_EXIT_CODE" = "0" ]; then
-            STATUS="PASS"
-            GATE="PASSED"
-          else
-            STATUS="FAIL"
-            GATE="FAILED"
-          fi
-
-          {
-            echo "## Linting Report"
-            echo ""
-            echo "| Control | Status |"
-            echo "|---|---|"
-            echo "| Linting | $STATUS |"
-            echo "| Tool | Ruff |"
-            echo "| Source | backend/backend-application |"
-            echo "| Files Checked | Python source and test files |"
-            echo "| Violations | $VIOLATIONS |"
-            echo "| Lint Gate | $GATE |"
-            echo ""
-            echo "### Report Artifact"
-            echo ""
-            echo "| Artifact | Status |"
-            echo "|---|---|"
-            echo "| ruff-lint-report | GENERATED |"
-            echo "| ruff-lint-report.html | GENERATED |"
-          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Enforce lint gate
         if: always()
         env:
-          RUFF_EXIT_CODE: ${{ steps.ruff.outputs.exit_code }}
+          HTMLHINT_EXIT_CODE: ${{ steps.htmlhint.outputs.exit_code }}
+          HADOLINT_EXIT_CODE: ${{ steps.hadolint.outputs.exit_code }}
+          NGINX_EXIT_CODE: ${{ steps.nginx.outputs.exit_code }}
         run: |
-          if [ "$RUFF_EXIT_CODE" != "0" ]; then
-            echo "Ruff linting failed. Review the uploaded lint report."
+          if [ "$HTMLHINT_EXIT_CODE" != "0" ] ||
+             [ "$HADOLINT_EXIT_CODE" != "0" ] ||
+             [ "$NGINX_EXIT_CODE" != "0" ]; then
+            echo "Frontend lint gate FAILED."
             exit 1
           fi
+
+          echo "Frontend lint gate PASSED."
