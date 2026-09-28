@@ -28,6 +28,7 @@ jobs:
         with:
           args: >
             -Dsonar.projectKey=AymanKamell_myapp-frontend
+            -Dsonar.organization=aymankamel
             -Dsonar.qualitygate.wait=true
             -Dsonar.qualitygate.timeout=300
 
