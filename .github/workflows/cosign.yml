@@ -39,7 +39,7 @@ jobs:
           test -f myapp-frontend.spdx.json
 
           echo "SBOM artifact:"
-          ls -lh myapp-frontned.spdx.json
+          ls -lh myapp-frontend.spdx.json
 
       - name: Install Cosign
         uses: sigstore/cosign-installer@v3.9.0
