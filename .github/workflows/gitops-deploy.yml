@@ -29,19 +29,19 @@ jobs:
           token: ${{ secrets.GITOPS_TOKEN }}
           path: myapp-gitops
 
-      - name: Update backend image digest
+      - name: Update frontend image digest
         working-directory: myapp-gitops
         env:
           IMAGE_DIGEST: ${{ inputs.image-digest }}
         run: |
           sed -i \
             "s|^\(\s*digest:\s*\).*|\1${IMAGE_DIGEST}|" \
-            backend/kustomization.yaml
+            frontend/kustomization.yaml
 
       - name: Verify change
         working-directory: myapp-gitops
         run: |
-          git diff -- backend/kustomization.yaml
+          git diff -- frontend/kustomization.yaml
 
       - name: Commit and push GitOps change
         id: gitops-push
@@ -50,9 +50,9 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
-          git add backend/kustomization.yaml
+          git add frontend/kustomization.yaml
 
-          git commit -m "Update backend image digest"
+          git commit -m "Update frontend image digest"
 
           git push origin main
 
@@ -82,6 +82,6 @@ jobs:
             echo "|---|---|"
             echo "| Repository | AymanKamell/myapp-gitops |"
             echo "| Branch | main |"
-            echo "| Manifest | backend/kustomization.yaml |"
+            echo "| Manifest | frontend/kustomization.yaml |"
             echo "| Image Digest | \`$IMAGE_DIGEST\` |"
           } >> "$GITHUB_STEP_SUMMARY"
