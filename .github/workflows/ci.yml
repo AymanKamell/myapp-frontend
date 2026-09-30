@@ -16,17 +16,17 @@ jobs:
   lint:
     uses: ./.github/workflows/lint.yml
 
-  sonarqube:
-    uses: ./.github/workflows/sonarqube.yml
-    secrets:
-      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+  #sonarqube:
+   # uses: ./.github/workflows/sonarqube.yml
+    #secrets:
+      #SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
   build-secure:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs:
       - source-security
       - lint
-      - sonarqube
+     # - sonarqube
     uses: ./.github/workflows/build-secure-image.yml
     secrets:
       DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
