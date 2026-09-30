@@ -31,15 +31,15 @@ jobs:
       - name: Download SBOM
         uses: actions/download-artifact@v6
         with:
-          name: myapp-backend-sbom
+          name: myapp-frontend-sbom
           path: .
 
       - name: Verify SBOM artifact
         run: |
-          test -f myapp-backend.spdx.json
+          test -f myapp-frontend.spdx.json
 
           echo "SBOM artifact:"
-          ls -lh myapp-backend.spdx.json
+          ls -lh myapp-frontned.spdx.json
 
       - name: Install Cosign
         uses: sigstore/cosign-installer@v3.9.0
@@ -74,7 +74,7 @@ jobs:
             --yes \
             --key "$RUNNER_TEMP/cosign.key" \
             --type spdxjson \
-            --predicate myapp-backend.spdx.json \
+            --predicate myapp-frontend.spdx.json \
             "$IMAGE_REF"
 
       - name: Verify SBOM attestation
@@ -115,7 +115,7 @@ jobs:
             echo ""
             echo "| Security Control | Status |"
             echo "|---|---|"
-            echo "| SBOM Artifact | $([ -f myapp-backend.spdx.json ] && echo "AVAILABLE" || echo "MISSING") |"
+            echo "| SBOM Artifact | $([ -f myapp-frontend.spdx.json ] && echo "AVAILABLE" || echo "MISSING") |"
             echo "| SBOM Attestation | ${ATTEST_OUTCOME^^} |"
             echo "| SBOM Attestation Verification | ${ATTEST_VERIFY_OUTCOME^^} |"
             echo "| Image Signature | ${SIGN_OUTCOME^^} |"
